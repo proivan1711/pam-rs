@@ -49,6 +49,9 @@ unsafe extern "C" {
 
     fn pam_get_user(pamh: *mut PamHandle, user: &mut *const c_char, prompt: *const c_char)
     -> c_int;
+
+    #[cfg(target_os = "linux")]
+    fn pam_syslog(pamh: *const PamHandle, priority: c_int, fmt: *const c_char, ...);
 }
 
 extern "C" fn cleanup<T>(_: *mut PamHandle, c_data: *mut libc::c_void, _: c_int) {
@@ -71,6 +74,44 @@ extern "C" fn cleanup<T>(_: *mut PamHandle, c_data: *mut libc::c_void, _: c_int)
 }
 
 pub type PamResult<T> = Result<T, PamResultCode>;
+
+/// Log levels as defined in the `syslog(3)` manual page.
+#[cfg(target_os = "linux")]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum LogLevel {
+    /// System is unusable, corresponds to `LOG_EMERG`.
+    Emergency,
+    /// Action must be taken immediately, corresponds to `LOG_ALERT`.
+    Alert,
+    /// Critical conditions, corresponds to `LOG_CRIT`.
+    Critical,
+    /// Error conditions, corresponds to `LOG_ERR`.
+    Error,
+    /// Warning conditions, corresponds to `LOG_WARNING`.
+    Warning,
+    /// Normal, but significant, condition, corresponds to `LOG_NOTICE`.
+    Notice,
+    /// Informational message, corresponds to `LOG_INFO`.
+    Info,
+    /// Debug-level message, corresponds to `LOG_DEBUG`.
+    Debug,
+}
+
+#[cfg(target_os = "linux")]
+impl LogLevel {
+    fn to_raw(self) -> c_int {
+        match self {
+            Self::Emergency => libc::LOG_EMERG,
+            Self::Alert => libc::LOG_ALERT,
+            Self::Critical => libc::LOG_CRIT,
+            Self::Error => libc::LOG_ERR,
+            Self::Warning => libc::LOG_WARNING,
+            Self::Notice => libc::LOG_NOTICE,
+            Self::Info => libc::LOG_INFO,
+            Self::Debug => libc::LOG_DEBUG,
+        }
+    }
+}
 
 impl PamHandle {
     /// Gets some value, identified by `key`, that has been set by the module
@@ -217,6 +258,23 @@ impl PamHandle {
         }
         let bytes = unsafe { CStr::from_ptr(ptr).to_bytes() };
         String::from_utf8(bytes.to_vec()).map_err(|_| PamResultCode::PAM_SYSTEM_ERR)
+    }
+
+    /// Logs a message with the specified level to syslog.
+    ///
+    /// The message is prefixed with a string identifying the relevant PAM context.
+    ///
+    /// See `pam_syslog` in
+    /// <https://man7.org/linux/man-pages/man3/pam_syslog.3.html>
+    ///
+    /// # Errors
+    ///
+    /// - [`PamResultCode::PAM_BUF_ERR`] if the message contains a 0 byte.
+    #[cfg(target_os = "linux")]
+    pub fn log(&self, level: LogLevel, message: &str) -> PamResult<()> {
+        let c_message = CString::new(message).map_err(|_| PamResultCode::PAM_BUF_ERR)?;
+        unsafe { pam_syslog(self, level.to_raw(), c"%s".as_ptr(), c_message.as_ptr()) };
+        Ok(())
     }
 }
 
