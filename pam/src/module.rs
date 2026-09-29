@@ -99,7 +99,7 @@ pub enum LogLevel {
 
 #[cfg(target_os = "linux")]
 impl LogLevel {
-    fn to_raw(self) -> c_int {
+    const fn to_raw(self) -> c_int {
         match self {
             Self::Emergency => libc::LOG_EMERG,
             Self::Alert => libc::LOG_ALERT,
