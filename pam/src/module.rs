@@ -50,6 +50,8 @@ unsafe extern "C" {
     fn pam_get_user(pamh: *mut PamHandle, user: &mut *const c_char, prompt: *const c_char)
     -> c_int;
 
+    fn pam_putenv(pamh: *mut PamHandle, name_value: *const c_char) -> c_int;
+
     #[cfg(target_os = "linux")]
     fn pam_syslog(pamh: *const PamHandle, priority: c_int, fmt: *const c_char, ...);
 }
@@ -258,6 +260,28 @@ impl PamHandle {
         }
         let bytes = unsafe { CStr::from_ptr(ptr).to_bytes() };
         String::from_utf8(bytes.to_vec()).map_err(|_| PamResultCode::PAM_SYSTEM_ERR)
+    }
+
+    /// Sets, overrides, or deletes a PAM environment variable.
+    ///
+    /// `name_value` takes the form `NAME=value` to set, `NAME=` to set an
+    /// empty value, or `NAME` to delete.
+    ///
+    /// See `pam_putenv` in
+    /// <https://man7.org/linux/man-pages/man3/pam_putenv.3.html>
+    ///
+    /// # Errors
+    ///
+    /// - [`PamResultCode::PAM_BUF_ERR`] if `name_value` contains a 0 byte.
+    /// - [`PamResultCode`] if the underlying PAM function call fails.
+    pub fn putenv(&mut self, name_value: &str) -> PamResult<()> {
+        let c_name_value = CString::new(name_value).map_err(|_| PamResultCode::PAM_BUF_ERR)?;
+        let res = PamResultCode::from_raw(unsafe { pam_putenv(self, c_name_value.as_ptr()) });
+        if PamResultCode::PAM_SUCCESS == res {
+            Ok(())
+        } else {
+            Err(res)
+        }
     }
 
     /// Logs a message with the specified level to syslog.
